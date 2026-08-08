@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spyder-tortoisehg"
+version = "0.1.0"
+description = "Panneau Mercurial dans Spyder : le RepoWidget de TortoiseHg (graphe des revisions, fichiers, diff) ancre comme greffon"
+requires-python = ">=3.9"
+# tortoisehg et mercurial ne sont PAS declares ici : ils sont installes dans le venv de Spyder
+# par installation_Spyder_plugin_tortoisehg.sh, a partir des sources PATCHEES par
+# Commun/scripts_installation/patch_tortoisehg_qtpy.py. Les declarer en dependances pip ferait installer
+# l'amont, qui n'importe que PyQt et ne peut donc pas tourner ici.
+dependencies = ["qtpy", "qtawesome"]
+
+# Spyder decouvre les greffons tiers par ce groupe de points d'entree. Le nom du point d'entree
+# DOIT etre identique a l'attribut NAME de la classe, sinon Spyder leve une SpyderAPIError et
+# ignore le greffon (spyder/app/find_plugins.py).
+[project.entry-points."spyder.plugins"]
+tortoisehg = "spyder_tortoisehg.spyder.plugin:TortoiseHgPlugin"
+
+[tool.setuptools.packages.find]
+include = ["spyder_tortoisehg*"]
+
+# smartos_qsci : l'emulation maison de QScintilla sur QPlainTextEdit (aucun binding PySide6
+# de QScintilla n'existe), importee par le TortoiseHg patche. Module RACINE, a cote du
+# paquet : il doit etre importable en `import smartos_qsci` dans le venv de Spyder.
+# Vivait dans SmartOS Commun/scripts/ jusqu'au 08/08/2026 ; il voyage desormais avec le
+# greffon, seul consommateur.
+[tool.setuptools]
+py-modules = ["smartos_qsci"]
