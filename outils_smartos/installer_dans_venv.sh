@@ -71,17 +71,25 @@ if [ ! -x "$SPYDER_PYTHON" ]; then
   echo "         Installez d'abord Spyder (./installation_SmartPythonEditor.sh)." >&2
   exit 1
 fi
-SPYDER_VENV=$(dirname "$(dirname "$(realpath "$SPYDER_PYTHON")")")
+SPYDER_VENV="$(cd "$(dirname "$SPYDER_PYTHON")/.." && pwd -P)"
 echo "Environnement Spyder cible : $SPYDER_VENV"
 
 echo "Version de TortoiseHg : $THG_VERSION"
 PIP_CACHE_ARGS="${PIP_CACHE_ARGS:-}"
 
 # --- Sources de TortoiseHg, patchees -----------------------------------------
+# L'archive est mise en cache a cote du venv quand c'est possible (reinstallations sans
+# reseau), sinon en temporaire. La CONSTRUCTION, elle, est toujours en temporaire jetable :
+# un arbre de build remanent d'une session precedente (autre compte, autre version du
+# patch) est exactement le genre d'etat qui produit de faux diagnostics - constate le
+# 08/08/2026 avec un build du 03/08 possede par un autre compte, indestructible depuis
+# celui-ci.
 SOURCES_DIR="$SPYDER_VENV/../../sources"
-BUILD_DIR="$SPYDER_VENV/../../build/tortoisehg-$THG_VERSION-spyder"
+mkdir -p "$SOURCES_DIR" 2>/dev/null && [ -w "$SOURCES_DIR" ] || SOURCES_DIR="$(mktemp -d)"
+BUILD_PARENT="$(mktemp -d)"
+trap 'rm -rf "$BUILD_PARENT"' EXIT
+BUILD_DIR="$BUILD_PARENT/tortoisehg-$THG_VERSION-spyder"
 ARCHIVE="$SOURCES_DIR/tortoisehg-$THG_VERSION.tar.gz"
-mkdir -p "$SOURCES_DIR" "$(dirname "$BUILD_DIR")"
 if [ ! -s "$ARCHIVE" ]; then
   echo "Telechargement de TortoiseHg $THG_VERSION..."
   curl -sSL --fail -o "$ARCHIVE" \
@@ -91,9 +99,6 @@ if [ ! -s "$ARCHIVE" ]; then
       exit 1
     }
 fi
-# Dossier de construction REFAIT a neuf : le patch reecrit des fichiers, et repartir d'un
-# arbre a moitie patche par une version anterieure ouvrirait la porte aux faux diagnostics.
-rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 tar xzf "$ARCHIVE" -C "$BUILD_DIR" --strip-components=1
 python3 "$PLUGIN_DIR/outils/patch_tortoisehg_qtpy.py" "$BUILD_DIR" || exit 1
