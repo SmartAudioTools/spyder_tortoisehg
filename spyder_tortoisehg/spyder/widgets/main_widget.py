@@ -19,8 +19,11 @@ TROIS ETATS, ET UN SEUL EST LE BON CAS
                                       disparait pas : Spyder avale en silence les exceptions de
                                       chargement d'un greffon, un panneau muet serait
                                       indiscernable d'un greffon casse.
-    - aucun depot sous le projet      message d'attente ; c'est le cas quand aucun projet n'est
-                                      ouvert, ou qu'il n'est pas versionne sous Mercurial.
+    - aucun depot affiche             le registre SEUL, et a droite une phrase invitant a
+                                      choisir un depot dans la liste. C'est le cas quand aucun
+                                      projet n'est ouvert, ou qu'il n'est pas versionne sous
+                                      Mercurial. Le registre est monte au PREMIER AFFICHAGE du
+                                      panneau (showEvent), pas au demarrage de Spyder.
     - un depot                        le registre et le RepoWidget.
 
 ⚠ UN REPOWIDGET PAR DEPOT, ET ON GARDE LES PRECEDENTS. Ouvrir un depot demarre un serveur de
@@ -168,7 +171,27 @@ class TortoiseHgWidget(PluginMainWidget):
         # demarrage (cf. patch_spyder_lazy_imports.py) ; on ne va pas en rajouter un.
         # L'absence de TortoiseHg est donc constatee au premier depot a ouvrir, et dite
         # a l'utilisateur a ce moment-la.
-        self._afficher_message(_('Ouvrez un projet versionné sous Mercurial.'))
+        self._afficher_invite()
+
+    def showEvent(self, evenement):
+        """Au PREMIER affichage du panneau, monter le registre des dépôts.
+
+        Demande de l'utilisateur (09/08/2026) : « dans le panneau Mercurial, j'ai le message
+        "Ouvrez un projet versionné sous Mercurial" et tous les boutons sont grisés, au lieu
+        de m'afficher tous mes dépôts ». C'était exact : `_assurer_registre()` n'était appelé
+        que depuis `_afficher_depot()`, donc la liste de TOUS les dépôts connus - la promesse
+        de l'en-tête de ce module - n'apparaissait qu'une fois un dépôt déjà ouvert, ce qui
+        supposait un projet Spyder ouvert et versionné. Sans projet, le panneau se réduisait
+        à sa phrase d'attente.
+
+        C'est ici et pas dans setup() : setup() tourne au DÉMARRAGE de Spyder même si le
+        panneau n'est jamais ouvert, et construire le registre importe toute la pile
+        graphique de TortoiseHg (cf. le commentaire de setup()). showEvent() ne se déclenche
+        que lorsque le panneau est réellement montré - le coût n'est payé que par qui s'en
+        sert.
+        """
+        super().showEvent(evenement)
+        self._assurer_registre()
 
     def update_actions(self):
         # Toutes les actions demandent un depot affiche - c'est le « enabled='repoopen' » du
@@ -227,7 +250,7 @@ class TortoiseHgWidget(PluginMainWidget):
             return
         if racine is None:
             self._racine = None
-            self._afficher_message(_('Ouvrez un projet versionné sous Mercurial.'))
+            self._afficher_invite()
             self.update_actions()
             return
         self._afficher_depot(racine)
@@ -395,6 +418,15 @@ class TortoiseHgWidget(PluginMainWidget):
     def _afficher_message(self, texte):
         self._message.setText(texte)
         self._pile.setCurrentWidget(self._message)
+
+    def _afficher_invite(self):
+        """Ce qu'on lit tant qu'aucun depot n'est affiche - ecrit a UN seul endroit.
+
+        Deux etats y menent (aucun depot au demarrage, et un projet non versionne), et la
+        phrase decrit ce qui est a l'ecran : la liste des depots a gauche, rien a droite.
+        """
+        self._afficher_message(_('Choisissez un dépôt dans la liste, ou ouvrez un projet '
+                                 'versionné sous Mercurial.'))
 
     def racine_courante(self):
         return self._racine
