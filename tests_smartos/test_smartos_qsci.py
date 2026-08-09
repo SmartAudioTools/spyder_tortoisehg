@@ -33,7 +33,8 @@ if not _installes:
 if os.environ.get('QT_API', '').lower() not in _installes:
     os.environ['QT_API'] = _installes[0]
 
-from qtpy.QtGui import QColor, QFont  # noqa: E402
+from qtpy.QtCore import QEvent, QPointF, Qt  # noqa: E402
+from qtpy.QtGui import QColor, QFont, QMouseEvent  # noqa: E402
 from qtpy.QtWidgets import QApplication  # noqa: E402
 
 from smartos_qsci import QsciLexerDiff, QsciScintilla  # noqa: E402
@@ -51,6 +52,22 @@ _controles = []
 
 def verifie(nom, obtenu, attendu):
     _controles.append((nom, obtenu == attendu, obtenu, attendu))
+
+
+def relacher_la_souris(editeur, position_caractere):
+    """Relache le bouton gauche AU PIXEL du caractere demande.
+
+    On vise un pixel et pas une position logique : c'est tout l'objet du test. Scintilla decide
+    d'emettre SCN_INDICATORRELEASE a partir de l'endroit CLIQUE, et une emulation qui se
+    contenterait du curseur de texte courant passerait ce banc tout en etant fausse a l'ecran.
+    """
+    curseur = editeur.textCursor()
+    curseur.setPosition(position_caractere)
+    point = editeur.cursorRect(curseur).center()
+    evenement = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(point), QPointF(point),
+                            Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton,
+                            Qt.KeyboardModifier.NoModifier)
+    editeur.mouseReleaseEvent(evenement)
 
 
 def main():
@@ -97,6 +114,42 @@ def main():
     verifie('un indicateur est pose', len(e.extraSelections()) >= 1, True)
     e.SendScintilla(QsciScintilla.SCI_INDICATORCLEARRANGE, 0, e.length())
     verifie('indicateurs effaces', e.extraSelections(), [])
+
+    # --- SCN_INDICATORRELEASE : le lien bleu « afficher quand meme ».
+    #     TortoiseHg pose un indicateur sur ces quelques mots du message d'erreur d'un fichier
+    #     qu'il refuse d'afficher, et s'y branche pour le rendre cliquable (fileview.py et
+    #     chunks.py, _setupForceViewIndicator). Sans ce signal, selectionner un tel fichier
+    #     leve une AttributeError - signale par l'utilisateur le 09/08/2026.
+    #     DEUX controles, et le SECOND compte autant : un relachement AILLEURS dans le message
+    #     ne doit RIEN emettre, sinon cliquer dans le vide forcerait l'affichage du fichier.
+    texte = "Le fichier est trop gros pour etre affiche. afficher quand meme ?\n"
+    lien = "afficher quand meme"
+    e.setWrapMode(QsciScintilla.WrapMode.WrapNone)
+    e.resize(900, 200)
+    e.setText(texte)
+    debut, fin = texte.index(lien), texte.index(lien) + len(lien)
+    #     LE BRANCHEMENT EST CELUI DE TORTOISEHG, PAS UN BRANCHEMENT DE CONFORT : slot SANS
+    #     AUCUN argument, en QueuedConnection. Un signal a arguments `object` livre en differe
+    #     est le cas ou Qt exige que le type soit connu de son systeme de metatypes ; le tester
+    #     autrement (connexion directe, slot a deux arguments) laisserait passer precisement ce
+    #     qui casserait a l'ecran.
+    numero = e.indicatorDefine(QsciScintilla.IndicatorStyle.PlainIndicator)
+    e.setIndicatorDrawUnder(True, numero)
+    e.setIndicatorForegroundColor(QColor('blue'), numero)
+    e.fillIndicatorRange(0, debut, 0, fin, numero)
+    differes, positions = [], []
+    e.SCN_INDICATORRELEASE.connect(lambda: differes.append(1), Qt.ConnectionType.QueuedConnection)
+    e.SCN_INDICATORRELEASE.connect(lambda position, modificateurs: positions.append(position))
+    milieu = (debut + fin) // 2
+    relacher_la_souris(e, milieu)
+    app.processEvents()
+    verifie('relachement SUR le lien : slot differe appele', len(differes), 1)
+    verifie('position rendue en octets', positions[:1], [e.positionFromLineIndex(0, milieu)])
+    relacher_la_souris(e, 3)
+    app.processEvents()
+    verifie('relachement HORS du lien : silence', len(differes), 1)
+    e.SendScintilla(QsciScintilla.SCI_INDICATORCLEARRANGE, 0, e.length())
+    e.setText(DIFF)
 
     # --- Recherche par expression reguliere (Scintilla.find de TortoiseHg passe par la).
     e.setCursorPosition(0, 0)

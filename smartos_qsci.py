@@ -501,6 +501,16 @@ class QsciScintilla(QPlainTextEdit):
     # Emis quand la taille de police change (Ctrl+molette). fileview.py s'y branche pour
     # recalculer la largeur de defilement horizontal.
     SCN_ZOOM = Signal()
+    # Emis quand le bouton de la souris est RELACHE sur un intervalle porteur d'un indicateur.
+    # C'est ce qui rend cliquable le lien bleu « afficher quand meme » que TortoiseHg pose sur
+    # le message d'erreur d'un fichier qu'il refuse d'afficher (trop gros, binaire) :
+    # fileview.py:_setupForceViewIndicator et chunks.py:_setupForceViewIndicator s'y branchent,
+    # tous deux en connexion differee (QueuedConnection), et leur slot ne prend AUCUN argument.
+    # Signature (position, modificateurs), comme SCN_INDICATORRELEASE de QScintilla ; la
+    # position est une position en OCTETS, comme toutes les positions de Scintilla, et les
+    # modificateurs passent en `object` - meme convention que marginClicked ci-dessous, un
+    # Qt.KeyboardModifiers ne se convertit pas en int de la meme facon sous les deux bindings.
+    SCN_INDICATORRELEASE = Signal(int, object)
     marginClicked = Signal(int, int, object)
     # QScintilla emet cursorPositionChanged(ligne, index) la ou QPlainTextEdit emet un signal
     # SANS argument. On ne peut pas simplement redeclarer le nom : sous PySide6 (mesure du
@@ -1098,6 +1108,26 @@ class QsciScintilla(QPlainTextEdit):
         super().wheelEvent(event)
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             self.SCN_ZOOM.emit()
+
+    def mouseReleaseEvent(self, event):
+        # Scintilla n'emet SCN_INDICATORRELEASE que si le relachement a lieu SUR du texte
+        # porteur d'un indicateur - c'est ce qui distingue le clic sur le lien bleu du clic
+        # n'importe ou ailleurs dans le message. Sans ce test, cliquer dans le vide forcerait
+        # l'affichage du fichier, ce qui est exactement le faux positif a eviter.
+        super().mouseReleaseEvent(event)
+        position = self._positionSousIndicateur(event)
+        if position is not None:
+            self.SCN_INDICATORRELEASE.emit(self._charToByte(position), event.modifiers())
+
+    def _positionSousIndicateur(self, event):
+        """Position (en caracteres) du point clique s'il tombe dans un indicateur, sinon None."""
+        point = event.position().toPoint() if hasattr(event, 'position') else event.pos()
+        position = self.cursorForPosition(point).position()
+        for intervalles in self._indicRanges.values():
+            for debut, fin in intervalles:
+                if debut <= position < fin:
+                    return position
+        return None
 
     def standardCommands(self):
         return _StandardCommands()
