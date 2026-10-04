@@ -21,6 +21,11 @@ LES CINQ PREPARATIFS, ET CE QUI ARRIVE SI ON EN OUBLIE UN
     4. qtlib.initfontcache(ui)          polices. Sans lui, getfont() leve une assertion.
     5. ActionRegistry + RepoManager     ce que le RepoWidget recoit en arguments.
 
+ET UN SIXIEME GESTE, QUI N'EST PAS UN PREPARATIF MAIS UNE CORRECTION
+    _confiner_les_raccourcis_standard() : TortoiseHg pose ses raccourcis de touche standard
+    (Ctrl+F, F5) sur la FENETRE, ce qui n'a de sens que dans son Workbench. Dans Spyder, cette
+    fenetre est celle de l'editeur, et le Ctrl+F de l'editeur devient ambigu. Cf. la fonction.
+
 ⚠ CE MODULE N'IMPORTE TORTOISEHG QU'A L'APPEL, JAMAIS AU CHARGEMENT. Spyder avale en silence
   toute exception levee pendant le chargement d'un greffon : un import manquant ferait
   disparaitre le panneau du menu, sans un mot. Ici, l'absence de TortoiseHg est un etat NOMME,
@@ -131,6 +136,7 @@ def contexte():
     _montrer_les_onglets_de_taches(ui)
     qtlib.configstyles(ui)
     qtlib.initfontcache(ui)
+    _confiner_les_raccourcis_standard(qtlib)
 
     registre = shortcutregistry.ActionRegistry()
     registre.readSettings()
@@ -138,6 +144,58 @@ def contexte():
 
     _contexte = ContexteThg(ui, registre, thgrepo.RepoManager(ui))
     return _contexte
+
+
+def _confiner_les_raccourcis_standard(qtlib):
+    """Confine au panneau les raccourcis « touche standard » que TortoiseHg pose sur la FENETRE.
+
+    ⚠ SANS CELA, CTRL+F NE FAIT PLUS RIEN DANS L'EDITEUR DES QUE LE PANNEAU A ETE OUVERT UNE
+    FOIS. Signale par l'utilisateur le 04/10/2026 : « rien du tout ne s'affiche, il ne se passe
+    rien ». TortoiseHg cree ses raccourcis de touche standard par qtlib.newshortcutsforstdkey(),
+    qui n'appelle pas setContext() : le contexte retombe donc sur le defaut de Qt,
+    Qt.WindowShortcut. Dans son Workbench, la fenetre est a lui et c'est sans consequence ; dans
+    Spyder, la fenetre est celle de l'editeur. La vue de fichier (HgFileView) pose ainsi un
+    Ctrl+F valable dans TOUTE la fenetre, qui vient s'ajouter a celui de l'editeur (porte sur
+    EditorMainWidget, en WidgetWithChildrenShortcut). Deux detenteurs actifs couvrant le widget
+    focalise : Qt declare le raccourci AMBIGU et n'en declenche AUCUN, sans un mot sur la sortie
+    d'erreur.
+
+    Mesure du 04/10/2026 (sonde_correctif.py, offscreen, config reelle de l'utilisateur) : avec
+    le focus dans l'editeur, activatedAmbiguously du raccourci de l'editeur se declenche des que
+    le panneau est ouvert, et la barre de recherche ne s'ouvre pas ; raccourcis confines, c'est
+    activated qui revient et la barre s'ouvre. Le raccourci Ctrl+F de TortoiseHg continue de
+    fonctionner quand c'est SA vue de fichier qui a le focus - ce qui est le garde-fou : il ne
+    s'agit pas de guerir l'editeur en cassant la recherche du panneau.
+
+    ON ENVELOPPE L'AIDE, PAS SES SEPT APPELANTS. Le defaut est dans newshortcutsforstdkey, pas
+    dans l'appel de HgFileView : six autres widgets de TortoiseHg l'utilisent (chunks, rejects,
+    qscilib, commit, status, quickop, revdetails), pour Find et pour Refresh - donc pour F5, que
+    Spyder utilise aussi (« Executer le fichier »). Les envelopper d'un coup, ici, couvre les
+    appels a venir ; reposer le contexte apres coup sur les QShortcut d'un RepoWidget construit
+    ne couvrirait que les widgets deja crees - les onglets de taches de TortoiseHg se
+    construisent a la demande.
+
+    ALTERNATIVE ECARTEE : corriger la ligne fautive dans la copie embarquee
+    (_vendor/tortoisehg/hgqt/fileview.py). Elle est versionnee, mais REGENEREE par
+    outils/vendoriser_tortoisehg.py : le correctif aurait du vivre dans cet outil, et n'aurait
+    de toute facon rien fait tant que la copie active est celle installee dans le venv. Ici, le
+    greffon corrige le comportement sans modifier TortoiseHg, donc sans rien a rejouer apres une
+    reinstallation ou une montee de version.
+
+    WidgetWithChildrenShortcut plutot que WidgetShortcut : la touche doit agir quand le focus est
+    sur un ENFANT du widget qui l'enregistre - l'editeur Scintilla pour la vue de fichier.
+    """
+    from qtpy.QtCore import Qt
+
+    origine = qtlib.newshortcutsforstdkey
+
+    def newshortcutsforstdkey(key, *args, **kwargs):
+        raccourcis = origine(key, *args, **kwargs)
+        for raccourci in raccourcis:
+            raccourci.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        return raccourcis
+
+    qtlib.newshortcutsforstdkey = newshortcutsforstdkey
 
 
 def _montrer_les_onglets_de_taches(ui):
