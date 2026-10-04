@@ -3,3 +3,6 @@ build/
 dist/
 *.egg-info/
 *.pyc
+# derives de amont/ticket-tortoisehg.md, reconstruits a la demande
+amont/corps-ticket.md
+amont/ticket-url.txt

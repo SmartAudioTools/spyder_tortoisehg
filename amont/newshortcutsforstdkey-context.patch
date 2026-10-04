@@ -1,0 +1,33 @@
+--- a/tortoisehg/hgqt/qtlib.py
++++ b/tortoisehg/hgqt/qtlib.py
+@@ -1598,12 +1598,27 @@
+     except AttributeError:
+         return QKeySequence(o)
+
++#: Shortcut context given to the shortcuts built by newshortcutsforstdkey()
++#: when no explicit context is passed.  Left to None, nothing is set and Qt's
++#: own default (Qt.WindowShortcut) applies, exactly as before.  An application
++#: that EMBEDS thg widgets next to its own can set this to
++#: Qt.WidgetWithChildrenShortcut so these shortcuts stay confined to the thg
++#: widget they belong to.
++stdkeyshortcutcontext: Optional[Qt.ShortcutContext] = None
++
+ def newshortcutsforstdkey(
+-    key: QKeySequence.StandardKey, *args, **kwargs,
++    key: QKeySequence.StandardKey, *args,
++    context: Optional[Qt.ShortcutContext] = None, **kwargs,
+ ) -> List[QShortcut]:
+     """Create [QShortcut,...] for all key bindings of the given StandardKey"""
+-    return [QShortcut(keyseq, *args, **kwargs)
+-            for keyseq in QKeySequence.keyBindings(key)]
++    shortcuts = [QShortcut(keyseq, *args, **kwargs)
++                 for keyseq in QKeySequence.keyBindings(key)]
++    if context is None:
++        context = stdkeyshortcutcontext
++    if context is not None:
++        for shortcut in shortcuts:
++            shortcut.setContext(context)
++    return shortcuts
+
+ class PaletteSwitcher:
+     """
