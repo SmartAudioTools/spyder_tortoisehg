@@ -44,6 +44,9 @@ from spyder.utils.stylesheet import AppStyle
 
 from spyder_tortoisehg.spyder import thg_contexte
 
+# Laisse l'editeur se dessiner et repondre avant d'importer Mercurial.
+DELAI_APRES_DEMARRAGE_MS = 1500
+
 # LA PANOPLIE DU WORKBENCH, REPRISE TELLE QUELLE
 #     (identifiant, libelle, icone, methode du RepoWidget)
 #
@@ -119,6 +122,7 @@ class TortoiseHgWidget(PluginMainWidget):
         self._pages = {}        # racine du depot -> RepoWidget
         self._actions = {}      # identifiant -> QAction, pour update_actions()
         self._racine = None
+        self._racine_demandee = None
         self._registre = None   # RepoRegistryView, construit avec le premier depot
 
         self._pile = QStackedWidget(self)
@@ -191,7 +195,23 @@ class TortoiseHgWidget(PluginMainWidget):
         sert.
         """
         super().showEvent(evenement)
-        self._assurer_registre()
+        self._apres_demarrage(self._assurer_registre)
+
+    def _apres_demarrage(self, fonction):
+        """Appelle `fonction` tout de suite, ou apres la fin du demarrage de Spyder.
+
+        Monter le registre ou un depot importe Mercurial et la pile graphique de TortoiseHg
+        (180 - 220 ms sur le fil principal, mesure du 05/10/2026). Pendant le demarrage, ce
+        temps retardait d'autant l'instant ou l'editeur repond : on le reporte juste apres.
+        Une fois Spyder demarre, rien ne change : l'appel est immediat.
+        """
+        fenetre = getattr(self._plugin, "main", None)
+        if fenetre is None or not getattr(fenetre, "is_setting_up", False):
+            fonction()
+            return
+        from qtpy.QtCore import QTimer
+        fenetre.sig_setup_finished.connect(
+            lambda: QTimer.singleShot(DELAI_APRES_DEMARRAGE_MS, fonction))
 
     def update_actions(self):
         # Toutes les actions demandent un depot affiche - c'est le « enabled='repoopen' » du
@@ -246,6 +266,9 @@ class TortoiseHgWidget(PluginMainWidget):
     def afficher_pour(self, chemin):
         """Affiche le depot contenant ce chemin, s'il y en a un."""
         racine = thg_contexte.racine_depot(chemin)
+        # La DERNIERE demande : un affichage reporte par _apres_demarrage ne doit pas
+        # ressortir un depot que l'utilisateur a deja quitte entre-temps.
+        self._racine_demandee = racine
         if racine == self._racine:
             return
         if racine is None:
@@ -253,7 +276,8 @@ class TortoiseHgWidget(PluginMainWidget):
             self._afficher_invite()
             self.update_actions()
             return
-        self._afficher_depot(racine)
+        self._apres_demarrage(
+            lambda: racine == self._racine_demandee and self._afficher_depot(racine))
 
     def _afficher_depot(self, racine):
         if racine not in self._pages:
@@ -387,8 +411,11 @@ class TortoiseHgWidget(PluginMainWidget):
         if self._registre is not None:
             return
         try:
-            from tortoisehg.hgqt.reporegistry import RepoRegistryView
+            # Le contexte D'ABORD : c'est lui qui donne a Mercurial des flux standard
+            # utilisables. Importer avant echouait en silence des que la console interne de
+            # Spyder avait remplace sys.stdout (panneau montre apres le demarrage).
             contexte = thg_contexte.contexte()
+            from tortoisehg.hgqt.reporegistry import RepoRegistryView
             registre = RepoRegistryView(contexte.gestionnaire, self)
         except Exception:
             # Le registre est un CONFORT : s'il manque, le panneau reste utilisable avec le
